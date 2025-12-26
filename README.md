@@ -8,16 +8,16 @@ Dalo는 안드로이드 환경에서 유튜브 영상을 비디오나 오디오�
 
 ----
 
-## 📖 Dalo 사용 가이드 (User Guide)
+## Dalo 사용 가이드 (User Guide)
 
 ### 한국어
 
-#### 🚀 사용 방법
+#### 사용 방법
 1. **URL 입력**: 다운로드하고 싶은 유튜브 영상의 링크(URL)를 입력란에 붙여넣으세요.
 2. **형식 선택**: **음악(Audio)** 또는 **동영상(Video)** 버튼을 눌러 원하는 파일 형식을 선택하세요.
 3. **다운로드 시작**: **다운로드** 버튼을 클릭하면 다운로드가 시작됩니다.
 
-#### ✨ 주요 특징
+#### 주요 특징
 * **백그라운드 지원**: 앱을 닫거나 화면을 꺼도 다운로드는 백그라운드에서 계속 진행됩니다.
 * **파일 저장 경로**: 다운로드된 파일은 기기의 `Download/Dalo/Music` 또는 `Download/Dalo/Video` 폴더에 저장됩니다.
 * **다운로드 설정**: 설정 메뉴(우측 상단 톱니바퀴)에서 선호하는 **음질, 해상도, FPS(프레임)**를 지정할 수 있습니다.
@@ -25,12 +25,12 @@ Dalo는 안드로이드 환경에서 유튜브 영상을 비디오나 오디오�
   
 ### English
 
-#### 🚀 How to Use
+#### How to Use
 1. **Enter URL**: Paste the YouTube video link (URL) into the input field.
 2. **Select Format**: Choose your desired format by tapping **Music (Audio)** or **Video**.
 3. **Start Download**: Click the **Download** button to begin.
 
-#### ✨ Key Features
+#### Key Features
 * **Background Download**: Downloads continue in the background even if you close the app or turn off the screen.
 * **Storage Location**: Files are saved in the `Download/Dalo/Music` or `Download/Dalo/Video` directory on your device.
 * **Preferences**: You can configure your preferred **Audio Quality, Video Resolution, and FPS** in the Settings menu.
