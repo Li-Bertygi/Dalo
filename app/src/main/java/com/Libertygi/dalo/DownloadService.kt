@@ -23,25 +23,26 @@ import java.util.Locale
 class DownloadService : Service() {
 
     companion object {
-        // MainActivity -> Service
+        // MainActivity에서 서비스로 전달하는 데이터 키
         const val EXTRA_URL = "extra_url"
         const val EXTRA_MODE = "extra_mode"
 
-        // Service -> MainActivity (완료)
+        // 서비스에서 MainActivity로 보내는 완료 브로드캐스트 액션 및 키
         const val ACTION_DONE = "com.Libertygi.dalo.DOWNLOAD_DONE"
         const val EXTRA_RESULT = "extra_result"
 
-        // Service -> MainActivity (진행률)
+        // 서비스에서 MainActivity로 보내는 진행률 브로드캐스트 액션 및 키
         const val ACTION_PROGRESS = "com.Libertygi.dalo.DOWNLOAD_PROGRESS"
         const val EXTRA_PROGRESS = "extra_progress"
 
+        // 알림 채널 및 ID 상수
         private const val CHANNEL_ID = "ytdlp_download"
         private const val NOTI_ID = 1001
     }
 
     /**
-     * Chaquopy 쪽에서 콜백으로 호출될 인터페이스.
-     * main.py에서 cb.onProgress(0~100) 형태로 호출해야 함.
+     * 파이썬 스크립트(main.py)로부터 진행률 콜백을 받기 위한 인터페이스
+     * Chaquopy를 통해 파이썬 코드에서 이 인터페이스의 메소드를 호출합니다.
      */
     interface ProgressCallback {
         fun onProgress(p: Int)
@@ -51,9 +52,10 @@ class DownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // 알림 채널 생성 (Android 8.0 이상 필수)
         ensureChannel()
 
-        // Activity가 백그라운드여도 Service는 단독으로 뜰 수 있으므로 여기서도 Python 초기화
+        // 서비스가 앱의 진입점이 될 수도 있으므로 여기서도 Python 엔진을 초기화합니다.
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }
@@ -63,19 +65,23 @@ class DownloadService : Service() {
         val url = intent?.getStringExtra(EXTRA_URL) ?: ""
         val mode = intent?.getIntExtra(EXTRA_MODE, 0) ?: 0
 
+        // URL이 없으면 서비스 종료
         if (url.isBlank()) {
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // ✅ Foreground는 가능한 빨리 시작해야 OS가 kill 안 함
+        // 포그라운드 서비스 시작: 시스템에 의해 프로세스가 종료되는 것을 방지합니다.
         startForeground(NOTI_ID, buildProgressNotification(0, "다운로드 준비 중..."))
 
+        // 네트워크 작업 및 파일 처리는 메인 스레드(UI 스레드)를 차단하지 않도록 별도 스레드에서 수행합니다.
         Thread {
             val result = runYtDlpAndSave(url, mode)
 
             val success = !result.startsWith("ERR:")
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            // 작업 완료 후 결과 알림 표시
             nm.notify(
                 NOTI_ID,
                 buildDoneNotification(
@@ -84,13 +90,13 @@ class DownloadService : Service() {
                 )
             )
 
-            // ✅ 완료 브로드캐스트
+            // MainActivity 등에 완료 사실을 브로드캐스트로 알림
             sendBroadcast(Intent(ACTION_DONE).apply {
                 setPackage(packageName)
                 putExtra(EXTRA_RESULT, result)
             })
 
-            // stopForeground 호환
+            // 포그라운드 상태 해제
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_DETACH)
             } else {
@@ -104,7 +110,7 @@ class DownloadService : Service() {
     }
 
     // ----------------------------
-    // Notification
+    // 알림(Notification) 관리
     // ----------------------------
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -118,35 +124,38 @@ class DownloadService : Service() {
         }
     }
 
+    // 진행 중 상태 알림 생성 (진행 바 포함, 삭제 불가)
     private fun buildProgressNotification(progress: Int, text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Dalo 다운로드")
             .setContentText(text)
             .setOnlyAlertOnce(true)
-            .setOngoing(true) // ✅ 진행 중: 고정
-            .setProgress(100, progress.coerceIn(0, 100), false) // ✅ 진행바 표시
+            .setOngoing(true)
+            .setProgress(100, progress.coerceIn(0, 100), false)
             .build()
     }
 
+    // 완료 상태 알림 생성 (진행 바 제거, 클릭 시 삭제 가능)
     private fun buildDoneNotification(text: String, success: Boolean): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Dalo 다운로드")
             .setContentText(text)
             .setOnlyAlertOnce(false)
-            .setOngoing(false)     // ✅ 완료: 고정 해제
-            .setAutoCancel(true)   // ✅ 탭하면 사라짐
-            .setProgress(0, 0, false) // ✅ 진행바 제거
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setProgress(0, 0, false)
             .build()
     }
 
-
+    // 진행률 알림 업데이트
     private fun updateProgressNotification(progress: Int, text: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTI_ID, buildProgressNotification(progress, text))
     }
 
+    // 진행률 변경 사항을 브로드캐스트로 전송 (UI 업데이트용)
     private fun broadcastProgress(p: Int) {
         sendBroadcast(Intent(ACTION_PROGRESS).apply {
             setPackage(packageName)
@@ -155,12 +164,14 @@ class DownloadService : Service() {
     }
 
     // ----------------------------
-    // Download + Save
+    // 다운로드 및 저장 로직
     // ----------------------------
     private fun runYtDlpAndSave(url: String, mode: Int): String {
         return try {
+            // 작업용 임시 디렉토리 생성
             val workDir = File(filesDir, "ytdlp_work").apply { mkdirs() }
 
+            // 설정값 불러오기
             val prefs = getSharedPreferences("ytdlp_settings", MODE_PRIVATE)
             val audioQuality = prefs.getString("audio_quality", "high") ?: "high"
             val videoRes = prefs.getInt("video_resolution", 1080)
@@ -169,6 +180,7 @@ class DownloadService : Service() {
             val py = Python.getInstance()
             val module = py.getModule("main")
 
+            // 파이썬으로 전달할 콜백 객체
             val cb = object : ProgressCallback {
                 override fun onProgress(p: Int) {
                     val pp = p.coerceIn(0, 100)
@@ -177,6 +189,7 @@ class DownloadService : Service() {
                 }
             }
 
+            // main.py의 run_ytdlp 함수 호출
             val result = module.callAttr(
                 "run_ytdlp",
                 url,
@@ -191,24 +204,24 @@ class DownloadService : Service() {
 
             if (result.startsWith("ERR:")) return result
 
-            // ✅ main.py 결과 포맷: 줄 단위 KEY=VALUE
+            // 파이썬 실행 결과(문자열)를 파싱하여 처리
+            // 1. 오디오 모드
             if (mode == 0) {
-                // AUDIO
                 val path = getLineValue(result, "FILE")
                 val title = getLineValue(result, "FINAL_TITLE").ifBlank { "music" }
                 val src = File(path)
                 if (!src.exists()) return "ERR:audio file not found"
 
+                // MediaStore를 통해 공용 다운로드 폴더로 이동
                 saveToDownloads(src, title, isAudio = true)
                 src.delete()
 
-                // UI도 100% 보장(혹시 cb가 100 못 보냈을 때)
                 broadcastProgress(100)
                 return result
             }
 
+            // 2. 비디오 단일 파일 모드 (병합 불필요)
             if (result.startsWith("OK_SINGLE")) {
-                // VIDEO SINGLE
                 val path = getLineValue(result, "FILE")
                 val title = getLineValue(result, "FINAL_TITLE").ifBlank { "video" }
                 val src = File(path)
@@ -221,7 +234,8 @@ class DownloadService : Service() {
                 return result
             }
 
-            // VIDEO SPLIT (OK_SPLIT)
+            // 3. 비디오 분할 파일 모드 (병합 필요)
+            // 고화질 비디오와 오디오가 따로 다운로드된 경우
             val videoPath = getLineValue(result, "VIDEO")
             val audioPath = getLineValue(result, "AUDIO")
             val title = getLineValue(result, "FINAL_TITLE").ifBlank { "video" }
@@ -231,10 +245,12 @@ class DownloadService : Service() {
             if (!vFile.exists() || !aFile.exists()) return "ERR:split files not found"
 
             val merged = File(workDir, "$title.mp4")
+            // Android Native Muxer를 사용하여 병합 수행
             muxMp4(videoPath, audioPath, merged.absolutePath)
 
             saveToDownloads(merged, title, isAudio = false)
 
+            // 임시 파일 정리
             vFile.delete()
             aFile.delete()
             merged.delete()
@@ -247,7 +263,7 @@ class DownloadService : Service() {
     }
 
     // ----------------------------
-    // Parse: KEY=VALUE per line
+    // 문자열 파싱 헬퍼 (KEY=VALUE 형태)
     // ----------------------------
     private fun getLineValue(result: String, key: String): String {
         val lines = result.split('\n')
@@ -260,7 +276,7 @@ class DownloadService : Service() {
     }
 
     // ----------------------------
-    // Save to Downloads (MediaStore)
+    // 파일 저장 (MediaStore)
     // ----------------------------
     private fun saveToDownloads(src: File, title: String, isAudio: Boolean) {
         val ext = src.extension.lowercase(Locale.US).let { if (it.isBlank()) "" else ".$it" }
@@ -276,6 +292,7 @@ class DownloadService : Service() {
             )
         }
 
+        // MediaStore에 항목 삽입 및 데이터 복사
         val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: throw RuntimeException("MediaStore insert failed")
 
@@ -298,14 +315,16 @@ class DownloadService : Service() {
     }
 
     // ----------------------------
-    // Mux MP4
+    // 미디어 병합 (Muxing)
     // ----------------------------
     private fun muxMp4(videoPath: String, audioPath: String, outPath: String) {
+        // MediaMuxer: 비디오와 오디오 스트림을 하나의 MP4 컨테이너로 합칩니다.
         val muxer = MediaMuxer(outPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
         val vEx = MediaExtractor().apply { setDataSource(videoPath) }
         val aEx = MediaExtractor().apply { setDataSource(audioPath) }
 
+        // 트랙 선택 함수: 비디오 또는 오디오 트랙을 찾아 인덱스와 포맷을 반환
         fun select(ex: MediaExtractor, wantVideo: Boolean): Pair<Int, MediaFormat> {
             for (i in 0 until ex.trackCount) {
                 val fmt = ex.getTrackFormat(i)
@@ -330,6 +349,7 @@ class DownloadService : Service() {
         val buf = ByteBuffer.allocate(512 * 1024)
         val info = android.media.MediaCodec.BufferInfo()
 
+        // 데이터를 읽어서 Muxer에 쓰는 함수
         fun copy(ex: MediaExtractor, outTrack: Int) {
             while (true) {
                 info.offset = 0
@@ -342,7 +362,9 @@ class DownloadService : Service() {
             }
         }
 
+        // 비디오 트랙 복사
         copy(vEx, outV)
+        // 오디오 트랙 복사
         copy(aEx, outA)
 
         muxer.stop()
