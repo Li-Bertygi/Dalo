@@ -25,8 +25,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
 
-
 class MainActivity : AppCompatActivity() {
+
+    /**
+     * 알림 권한 요청 (Android 13/Tiramisu 이상)
+     * 포그라운드 서비스를 위해 알림 권한이 필수적입니다.
+     */
     private fun ensureNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33) {
             val granted = ContextCompat.checkSelfPermission(
@@ -44,10 +48,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        // 앱이 포그라운드 상태인지 추적하는 변수
+        // 다운로드 완료 시 앱이 백그라운드라면 종료하기 위해 사용됩니다.
         @Volatile var isInForeground: Boolean = false
     }
 
-    // UI
+    // UI 컴포넌트 변수 선언
     private lateinit var buttonMusic: Button
     private lateinit var buttonVideo: Button
     private lateinit var buttonDownload: Button
@@ -60,12 +66,13 @@ class MainActivity : AppCompatActivity() {
 
     private var settingsMenuItem: MenuItem? = null
 
-    // 기본: 음악 선택
-    private var selectedMode: Int = 0 // 0=audio, 1=video
+    // 현재 선택된 모드 (0: 오디오, 1: 비디오)
+    private var selectedMode: Int = 0
+    // 다운로드 진행 중 UI 잠금 상태
     private var uiLocked: Boolean = false
 
     // ---------------------------
-    // 진행률 브로드캐스트 수신
+    // 브로드캐스트 리시버: 진행률 업데이트
     // ---------------------------
     private val downloadProgressReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -75,24 +82,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------------------------
-    // 완료 브로드캐스트 수신
+    // 브로드캐스트 리시버: 다운로드 완료 처리
     // ---------------------------
     private val downloadDoneReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val result = intent?.getStringExtra(DownloadService.EXTRA_RESULT) ?: "ERR:unknown"
+
+            // UI 잠금 해제
             setUiLocked(false)
+
             if (result.startsWith("ERR:")) {
+                // 에러 발생 시 다이얼로그 표시 및 진행률 초기화
                 showErrorDialog(result)
                 setDownloadProgress(0f)
             } else {
-                // 완료: 체크만 보이게 처리됨(100% 텍스트 숨김)
+                // 성공 시 체크 아이콘 표시 (진행률 100% 처리)
                 setDownloadProgress(100f)
             }
 
-            // ✅ 완료 후에도 이전 선택 유지 + 알파(1/0.4) 유지
+            // 완료 후 버튼 선택 상태(알파값 등) 복구
             applySelectionUI()
 
-            // ✅ 완료 시점에 백그라운드였다면 앱(태스크) 종료
+            // 앱이 백그라운드에 있다면 작업 완료 후 프로세스 완전 종료
             if (!isInForeground) {
                 finishAndRemoveTask()
             }
@@ -100,20 +111,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------------------------
-    // ?si= 제거
+    // 유틸리티: URL 정리
     // ---------------------------
     private fun sanitizeYoutubeUrl(raw: String): String {
+        // 유튜브 공유 링크에 붙는 트래킹 파라미터(?si=...) 제거
         val s = raw.trim()
         val idx = s.lastIndexOf("?si=") // 뒤에서부터 탐색
         return if (idx >= 0) s.substring(0, idx) else s
     }
 
     // ---------------------------
-    // 메뉴
+    // 메뉴 구성
     // ---------------------------
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
         settingsMenuItem = menu.findItem(R.id.action_settings)
+        // 다운로드 중에는 설정 메뉴 접근 불가
         settingsMenuItem?.isEnabled = !uiLocked
         return true
     }
@@ -134,7 +147,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     // ---------------------------
-    // 라이프사이클
+    // 액티비티 생명주기
     // ---------------------------
     override fun onStart() {
         super.onStart()
@@ -150,8 +163,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // 권한 체크
         ensureNotificationPermission()
-        // 브로드캐스트 등록
+
+        // 서비스로부터 오는 브로드캐스트 리시버 등록
         ContextCompat.registerReceiver(
             this,
             downloadProgressReceiver,
@@ -166,12 +181,12 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
-        // Python 초기화(기존 유지)
+        // Chaquopy 파이썬 환경 초기화
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }
 
-        // bind views
+        // 뷰 바인딩
         buttonMusic = findViewById(R.id.button1)
         buttonVideo = findViewById(R.id.button2)
         buttonDownload = findViewById(R.id.button3)
@@ -182,32 +197,37 @@ class MainActivity : AppCompatActivity() {
         progressText = findViewById(R.id.progressText)
         progressCheck = findViewById(R.id.progressCheck)
 
+        // 입력창 초기화 버튼
         btnClear.setOnClickListener {
             if (uiLocked) return@setOnClickListener
             inputText.setText("")
         }
 
-        // 초기 UI 상태
+        // 초기 UI 상태 설정
         applySelectionUI()
         setDownloadProgress(0f)
 
+        // 음악(오디오) 모드 선택
         buttonMusic.setOnClickListener {
             if (uiLocked) return@setOnClickListener
             selectedMode = 0
             applySelectionUI()
         }
 
+        // 동영상 모드 선택
         buttonVideo.setOnClickListener {
             if (uiLocked) return@setOnClickListener
             selectedMode = 1
             applySelectionUI()
         }
 
+        // 설정 화면 이동
         btnSettings.setOnClickListener {
             if (uiLocked) return@setOnClickListener
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
+        // 다운로드 버튼 클릭
         buttonDownload.setOnClickListener {
             if (uiLocked) return@setOnClickListener
 
@@ -217,10 +237,11 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
+            // 다운로드 시작: UI 잠금 및 초기화
             setUiLocked(true)
             setDownloadProgress(0f)
 
-            // ✅ ForegroundService 시작(백그라운드에서도 다운로드)
+            // 포그라운드 서비스 시작 (백그라운드 다운로드 보장)
             val svc = Intent(this, DownloadService::class.java).apply {
                 putExtra(DownloadService.EXTRA_URL, url)
                 putExtra(DownloadService.EXTRA_MODE, selectedMode)
@@ -230,25 +251,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // 리시버 해제 (예외 처리 포함)
         try { unregisterReceiver(downloadProgressReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(downloadDoneReceiver) } catch (_: Exception) {}
         super.onDestroy()
     }
 
     // ---------------------------
-    // UI helpers
+    // UI 헬퍼 메소드
     // ---------------------------
 
     /**
-     * ✅ 선택된 버튼은 alpha=1.0, 선택되지 않은 버튼은 alpha=0.4
-     * ✅ 다운로드 전/후 선택 유지
+     * 버튼 선택 상태 UI 적용
+     * 선택된 버튼은 불투명(1.0), 선택되지 않은 버튼은 반투명(0.4) 처리합니다.
+     * UI가 잠겨있지 않을 때만 변경됩니다.
      */
     private fun applySelectionUI() {
         val selectedAlpha = 1.0f
         val unselectedAlpha = 0.4f
 
-        // uiLocked=true일 때는 setUiLocked에서 모두 0.4로 눌러두고,
-        // uiLocked=false로 풀릴 때만 이 규칙이 적용되도록 합니다.
         if (!uiLocked) {
             buttonMusic.alpha = if (selectedMode == 0) selectedAlpha else unselectedAlpha
             buttonVideo.alpha = if (selectedMode == 1) selectedAlpha else unselectedAlpha
@@ -256,11 +277,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * ✅ 다운로드 중에는 전체 비활성 + 알파 0.4
-     * ✅ 다운로드 종료 후에는 선택 버튼 1.0 / 비선택 0.4 복구
+     * 다운로드 중 UI 잠금/해제
+     * locked가 true면 모든 입력을 차단하고 버튼을 반투명하게 만듭니다.
+     * false면 입력을 활성화하고 버튼 상태를 복구합니다.
      */
     private fun setUiLocked(locked: Boolean) {
         uiLocked = locked
+        // 옵션 메뉴(설정 등) 갱신 트리거
         invalidateOptionsMenu()
 
         buttonMusic.isEnabled = !locked
@@ -269,6 +292,7 @@ class MainActivity : AppCompatActivity() {
         btnSettings.isEnabled = !locked
         inputText.isEnabled = !locked
         btnClear.isEnabled = !locked
+
         if (locked) {
             val alpha = 0.4f
             buttonMusic.alpha = alpha
@@ -278,20 +302,20 @@ class MainActivity : AppCompatActivity() {
             inputText.alpha = alpha
             btnClear.alpha = alpha
         } else {
-            // 다운로드 버튼/설정/입력은 정상 알파
+            // 잠금 해제 시 기본 버튼들은 완전 불투명
             buttonDownload.alpha = 1f
             btnSettings.alpha = 1f
             inputText.alpha = 1f
             btnClear.alpha = 1f
 
-            // 음악/동영상 버튼은 선택 규칙 적용
+            // 모드 선택 버튼은 현재 선택 상태에 따라 알파값 적용
             applySelectionUI()
         }
     }
 
     /**
-     * ✅ 다운로드 진행도 원형바 실시간 업데이트
-     * ✅ 완료 시 체크만 표시하고 "100%" 텍스트는 숨김
+     * 다운로드 진행률 업데이트 (원형 인디케이터)
+     * 100% 도달 시 숫자를 숨기고 완료 체크 아이콘을 표시합니다.
      */
     private fun setDownloadProgress(p: Float) {
         val clamped = p.coerceIn(0f, 100f)
@@ -301,7 +325,7 @@ class MainActivity : AppCompatActivity() {
 
         val done = (intP >= 100)
 
-        // 완료면 체크만
+        // 완료 여부에 따라 체크 아이콘/텍스트 전환
         progressCheck.visibility = if (done) View.VISIBLE else View.INVISIBLE
         progressText.visibility = if (done) View.INVISIBLE else View.VISIBLE
 
@@ -310,6 +334,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 에러 다이얼로그 표시
+     * ErrorDialogFragment 사용을 우선하되 실패 시 토스트 메시지로 대체합니다.
+     */
     private fun showErrorDialog(message: String) {
         try {
             ErrorDialogFragment.newInstance(message)
